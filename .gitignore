@@ -1,0 +1,25 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# 屏蔽大模型权重目录 (包含 .safetensors 和 git 信息)
+checkpoints/
+
+# 屏蔽数据集图片目录 (包含大量 jpg 和 zip)
+utils/DDVQA_images/
+
+# 屏蔽其他权重文件目录 (包含 .bin, .pth)
+utils/weights/
+
+# 屏蔽输出日志
+outputs/
+
+# 屏蔽特定的大文件扩展名 (作为双重保险)
+*.safetensors
+*.pth
+*.bin
+*.zip
+*.jsonl
+
+# 系统文件
+.DS_Store
