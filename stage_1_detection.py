@@ -21,12 +21,16 @@ from sequence.models.M2F2_Det.models.model import M2F2Det
 from sequence.torch_utils import eval_model,display_eval_tb,train_logging,get_lr_blocks,associate_param_with_lr,lrSched_monitor, step_train_logging, Metrics
 from sequence.runjobs_utils import init_logger,Saver,DataConfig,torch_load_model,get_iter,get_data_to_copy_str
 
-# --- 完整补丁代码：请确保包含 __len__ 和 __getitem__ ---
+# --- 完整补丁代码：已修复只加载 Deepfakes 的 Bug ---
+import torch
+import json
+import os
+import glob
+from PIL import Image
+
 class ImageFolderJSONDataset(torch.utils.data.Dataset):
     def __init__(self, data_root, transform_cfg, split_fn):
         self.data_root = data_root
-        import glob
-        from PIL import Image
         
         with open(split_fn, 'r') as f:
             self.folder_list = json.load(f)
@@ -67,13 +71,14 @@ class ImageFolderJSONDataset(torch.utils.data.Dataset):
                         for img_path in imgs:
                             self.samples.append((img_path, 1)) # Label 1
                         fake_count += 1
-                        # 找到了对应的伪造视频就跳出方法循环，避免重复添加
-                        break 
+                        # ！！！关键修改：已删除 break 语句 ！！！
+                        # 这样代码会继续循环，检查其他伪造方法（如 Face2Face, NeuralTextures 等）是否存在，
+                        # 从而确保数据集包含所有类型的伪造数据。
         
         print(f"数据加载完成！")
         print(f"  - 总图片数: {len(self.samples)}")
         print(f"  - 匹配到的真脸视频数: {real_count}")
-        print(f"  - 匹配到的假脸视频数: {fake_count}")
+        print(f"  - 匹配到的假脸视频(实例)数: {fake_count}")
         
         if fake_count == 0 or real_count == 0:
             print("!!! 严重警告: 依然没有加载到假脸，请检查 DATA_ROOT 结构 !!!")
@@ -83,17 +88,13 @@ class ImageFolderJSONDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         path, label = self.samples[index]
-        from PIL import Image
+        # 确保使用 RGB 转换，防止某些单通道图报错
         img = Image.open(path).convert('RGB')
         if self.transform:
             img = self.transform(img)
         return img, label
 # --- 补丁结束 ---
-
-
-
-
-
+ 
 def get_train_transformation_cfg():
     cfg = {
         'post': {
