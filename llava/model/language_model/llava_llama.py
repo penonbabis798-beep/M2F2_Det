@@ -631,7 +631,9 @@ class LlavaLlamaForCausalLMDeepfake(LlamaForCausalLM, LlavaMetaForCausalLM):
             raise ValueError("Only cls_patch is supported for mm_vision_select_feature.")
         
     def load_deepfake_encoder(self, model_path, verbose=True):
-        ckpt = torch.load(model_path)
+        # ckpt = torch.load(model_path)
+        # 添加 weights_only=False 参数
+        ckpt = torch.load(model_path, weights_only=False)
         state_dict = dict()
         for k, v in self.deepfake_encoder.state_dict().items():
             if k in ckpt:

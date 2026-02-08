@@ -1078,4 +1078,4 @@ def train(attn_implementation=None):
 
 
 if __name__ == "__main__":
-    train(attn_implementation='flash_attention_2')
+    train()

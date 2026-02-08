@@ -14,6 +14,10 @@ class CLIPVisionTower(nn.Module):
         self.select_layer = args.mm_vision_select_layer
         self.select_feature = getattr(args, 'mm_vision_select_feature', 'patch')
 
+        # === 新增：无论是否 delay_load，都先加载处理器 ===
+        self.image_processor = CLIPImageProcessor.from_pretrained(self.vision_tower_name)
+        # =================================================
+        
         if not delay_load:
             self.load_model()
         elif getattr(args, 'unfreeze_mm_vision_tower', False):
