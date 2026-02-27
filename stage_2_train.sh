@@ -13,8 +13,6 @@ DATA_PATH="./utils/DDVQA_split/c40/train_DDVQA_format.json"
 IMAGE_FOLDER="./utils/DDVQA_images/c40/images_all"
 
 # --- 3. 启动指令 ---
-# 使用 zero2.json
-# batch_size 改为 16, accum 改为 1
 deepspeed llava/train/train_deepfake.py \
     --deepspeed scripts/zero2.json \
     --model_name_or_path $MODEL_VERSION \
