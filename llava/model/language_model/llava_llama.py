@@ -726,6 +726,63 @@ class LlavaLlamaForCausalLMDeepfake(LlamaForCausalLM, LlavaMetaForCausalLM):
             return_dict=return_dict
         )
 
+    # @torch.no_grad()
+    # def generate(
+    #     self,
+    #     inputs: Optional[torch.Tensor] = None,
+    #     images: Optional[list] = None,
+    #     image_sizes: Optional[torch.Tensor] = None,
+    #     deepfake_inputs: Optional[list] = None,
+    #     **kwargs,
+    # ) -> Union[GenerateOutput, torch.LongTensor]:
+    #     position_ids = kwargs.pop("position_ids", None)
+    #     attention_mask = kwargs.pop("attention_mask", None)
+    #     if "inputs_embeds" in kwargs:
+    #         raise NotImplementedError("`inputs_embeds` is not supported")
+        
+    #     if images is not None or deepfake_inputs is not None:
+    #         image_tensor = None
+    #         if images is not None:
+    #             image_tensor = process_images(images, self.processors['clip_processor'], self.config)
+    #             if isinstance(image_tensor, list):
+    #                 image_tensor = [image.to(self.device, dtype=torch.float16) for image in image_tensor]
+    #             else:
+    #                 image_tensor = image_tensor.to(self.device, dtype=torch.float16)
+    #         if deepfake_inputs is not None:
+    #             if isinstance(deepfake_inputs, list):
+    #                 deepfake_processed_inputs = []
+    #                 for deepfake_input in deepfake_inputs:
+    #                     deepfake_processed_inputs.append(self.processors['deepfake_processor'].preprocess(deepfake_input, return_tensors='pt')['pixel_values'][0])
+    #                 deepfake_processed_inputs = torch.stack(deepfake_processed_inputs, dim=0).to(self.device)
+    #             else:
+    #                 raise notImplementedError
+    #         (
+    #             inputs,
+    #             position_ids,
+    #             attention_mask,
+    #             _,
+    #             inputs_embeds,
+    #             _
+    #         ) = self.prepare_inputs_labels_for_deepfake_multimodal(
+    #             inputs,
+    #             position_ids,
+    #             attention_mask,
+    #             None,
+    #             None,
+    #             images=image_tensor,
+    #             image_sizes=image_sizes,
+    #             deepfake_inputs=deepfake_processed_inputs
+    #         )
+    #     else:
+    #         inputs_embeds = self.get_model().embed_tokens(inputs)
+
+    #     return super().generate(
+    #         position_ids=position_ids,
+    #         attention_mask=attention_mask,
+    #         inputs_embeds=inputs_embeds,
+    #         **kwargs
+    #     )
+
     @torch.no_grad()
     def generate(
         self,
@@ -735,6 +792,9 @@ class LlavaLlamaForCausalLMDeepfake(LlamaForCausalLM, LlavaMetaForCausalLM):
         deepfake_inputs: Optional[list] = None,
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
+        # 【核心修复】这里必须先初始化为 None，否则后面会报错！
+        deepfake_processed_inputs = None 
+        
         position_ids = kwargs.pop("position_ids", None)
         attention_mask = kwargs.pop("attention_mask", None)
         if "inputs_embeds" in kwargs:
@@ -748,6 +808,7 @@ class LlavaLlamaForCausalLMDeepfake(LlamaForCausalLM, LlavaMetaForCausalLM):
                     image_tensor = [image.to(self.device, dtype=torch.float16) for image in image_tensor]
                 else:
                     image_tensor = image_tensor.to(self.device, dtype=torch.float16)
+            
             if deepfake_inputs is not None:
                 if isinstance(deepfake_inputs, list):
                     deepfake_processed_inputs = []
@@ -755,7 +816,8 @@ class LlavaLlamaForCausalLMDeepfake(LlamaForCausalLM, LlavaMetaForCausalLM):
                         deepfake_processed_inputs.append(self.processors['deepfake_processor'].preprocess(deepfake_input, return_tensors='pt')['pixel_values'][0])
                     deepfake_processed_inputs = torch.stack(deepfake_processed_inputs, dim=0).to(self.device)
                 else:
-                    raise notImplementedError
+                    raise NotImplementedError # 注意原作者这里写的是 notImplementedError (小写n)
+            
             (
                 inputs,
                 position_ids,
@@ -771,7 +833,7 @@ class LlavaLlamaForCausalLMDeepfake(LlamaForCausalLM, LlavaMetaForCausalLM):
                 None,
                 images=image_tensor,
                 image_sizes=image_sizes,
-                deepfake_inputs=deepfake_processed_inputs
+                deepfake_inputs=deepfake_processed_inputs # 修复前这里会报错，现在这里是 None，安全了
             )
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
@@ -782,7 +844,6 @@ class LlavaLlamaForCausalLMDeepfake(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs_embeds=inputs_embeds,
             **kwargs
         )
-
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None,
                                       inputs_embeds=None, **kwargs):
         images = kwargs.pop("images", None)
@@ -1010,4 +1071,4 @@ class LlavaLlamaForCausalLMDeepfake(LlamaForCausalLM, LlavaMetaForCausalLM):
 AutoConfig.register("llava_llama", LlavaConfig)
 AutoModelForCausalLM.register(LlavaConfig, LlavaLlamaForCausalLM)
 AutoModelForCausalLM.register(LlavaConfig, LlavaLlamaForCausalLMDeepfake)
-AutoModelForCausalLM.register(LlavaConfig, LlavaLlamaForCausalLMDummy)
+# AutoModelForCausalLM.register(LlavaConfig, LlavaLlamaForCausalLMDummy)
