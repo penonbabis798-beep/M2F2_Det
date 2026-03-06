@@ -94,7 +94,7 @@
 # 修改后：
 import torch
 import torch.nn as nn
-from transformers import  LIPVisionModel, CLIPImageProcessor, CLIPVisionConfig
+from transformers import  CLIPVisionModel, CLIPImageProcessor, CLIPVisionConfig
 
 class CLIPVisionTower(nn.Module):
     def __init__(self, vision_tower, args, delay_load=False):
