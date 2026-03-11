@@ -2,6 +2,7 @@ from pycocoevalcap.bleu.bleu import Bleu
 from pycocoevalcap.rouge.rouge import Rouge
 from pycocoevalcap.cider.cider import Cider
 from pycocoevalcap.spice.spice import Spice
+from pycocoevalcap.meteor.meteor import Meteor  # <-- 新增这一行
 import json
 import numpy as np
 import argparse
@@ -13,6 +14,7 @@ class Scorer():
         print('setting up scorers...')
         self.scorers = [
             (Bleu(4), ["Bleu_1", "Bleu_2", "Bleu_3", "Bleu_4"]),
+            (Meteor(), "METEOR"),  # <-- 新增这一行
             (Rouge(), "ROUGE_L"),
             (Cider(), "CIDEr"),
             (Spice(), "SPICE")

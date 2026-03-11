@@ -11,4 +11,4 @@ export HF_DATASETS_OFFLINE=1
 # 指定运行的显卡
 CUDA_NUM=0
 CUDA_VISIBLE_DEVICES=$CUDA_NUM python -m llava.serve.cli_DDVQA_det \
-    --model-path ./checkpoints/llava-M2F2-Det-Final
+    --model-path ./checkpoints/llava-M2F2-Det-Final 
