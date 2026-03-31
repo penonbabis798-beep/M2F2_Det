@@ -6,6 +6,71 @@ from transformers import AutoTokenizer, CLIPImageProcessor, CLIPTextModel
 from torch import nn
 from torch.nn import functional as F
 from typing import Optional
+
+######################## 新增：SRM 滤波器和频域特征提取器#######################
+class SRMFilter(nn.Module):
+    def __init__(self):
+        super(SRMFilter, self).__init__()
+        # SRM 经典的 3 种高频噪声滤波器
+        q = [4.0, 12.0, 2.0]
+        filter1 = [[0, 0, 0, 0, 0],
+                   [0, -1, 2, -1, 0],
+                   [0, 2, -4, 2, 0],
+                   [0, -1, 2, -1, 0],
+                   [0, 0, 0, 0, 0]]
+        filter2 = [[-1, 2, -2, 2, -1],
+                   [2, -6, 8, -6, 2],
+                   [-2, 8, -12, 8, -2],
+                   [2, -6, 8, -6, 2],
+                   [-1, 2, -2, 2, -1]]
+        filter3 = [[0, 0, 0, 0, 0],
+                   [0, 0, 0, 0, 0],
+                   [0, 1, -2, 1, 0],
+                   [0, 0, 0, 0, 0],
+                   [0, 0, 0, 0, 0]]
+        filter1 = np.asarray(filter1, dtype=float) / q[0]
+        filter2 = np.asarray(filter2, dtype=float) / q[1]
+        filter3 = np.asarray(filter3, dtype=float) / q[2]
+        filters = np.stack([filter1, filter2, filter3], axis=0) # [3, 5, 5]
+        filters = np.expand_dims(filters, axis=1) # [3, 1, 5, 5]
+        # 扩展到 RGB 三通道，输出将是 9 个通道的高频噪声图
+        filters = np.repeat(filters, 3, axis=0) 
+        self.weight = nn.Parameter(torch.FloatTensor(filters), requires_grad=False)
+
+    def forward(self, x):
+        # x: [B, 3, H, W]
+        x = x.to(torch.float32)
+        # 通过 fixed kernel 提取底层高频噪声
+        return F.conv2d(x, self.weight.to(x.device), padding=2, groups=3)
+
+class FrequencyExtractor(nn.Module):
+    def __init__(self, out_dim=256):
+        super().__init__()
+        self.srm = SRMFilter()
+        # 非常轻量的 CNN，专门学习高频噪声的分布，极低显存占用
+        self.net = nn.Sequential(
+            nn.Conv2d(9, 32, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(128, out_dim),
+            nn.LayerNorm(out_dim)
+        )
+
+    def forward(self, x):
+        noise_map = self.srm(x)
+        feat = self.net(noise_map)
+        return feat
+
+###############################################################
+
 # from flash_attn.modules.mha import MHA
 class MHA(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout=0.0, causal=False, **kwargs):
@@ -176,7 +241,8 @@ class M2F2Det(nn.Module):
         text_dtype: torch.dtype = torch.float32,
         deepfake_dtype: torch.dtype = torch.float32,
         load_vision_encoder: bool = True,
-        bridge_adapter_dim: int = 128
+        bridge_adapter_dim: int = 128,
+        use_freq: bool = True # <--- 【新增】频域开关，默认开启
     ):
         super(M2F2Det, self).__init__()
         self.clip_text_encoder = CLIPTextEncoder(clip_text_encoder_name, dtype=text_dtype)
@@ -236,7 +302,27 @@ class M2F2Det(nn.Module):
         # self.linear_lst = [self.linear_1, self.linear_2, self.linear_3]
         self.linear_lst = nn.ModuleList([self.linear_1, self.linear_2, self.linear_3])
         self.bridge_adapter_proj = BridgeAdapter_Proj(self.clip_hidden_size//16, self.bridge_adapter_dim)
-        self.output = nn.Linear(2 * self.hidden_size + bridge_adapter_dim, 2)
+        
+        self.use_freq = use_freq # 记录开关状态
+        
+        if self.use_freq:
+            # ======== 【空频双流模式】 ========
+            self.freq_dim = 256
+            self.freq_extractor = FrequencyExtractor(out_dim=self.freq_dim) # 或者叫 HighFrequencyExtractor 看你之前叫啥
+            self.freq_extractor.to(deepfake_dtype)
+            self.output = nn.Linear(2 * self.hidden_size + self.bridge_adapter_dim + self.freq_dim, 2)
+        else:
+            # ======== 【纯空间域 Baseline 模式】 ========
+            self.output = nn.Linear(2 * self.hidden_size + self.bridge_adapter_dim, 2)
+        # # ======== [新增] 挂载频域提取器 ========
+        # self.freq_dim = 256
+        # self.freq_extractor = FrequencyExtractor(out_dim=self.freq_dim)
+        # self.freq_extractor.to(deepfake_dtype)
+        
+        # # 将频域特征的维度 (freq_dim) 拼接到最终的分类器输入中
+        # self.output = nn.Linear(2 * self.hidden_size + bridge_adapter_dim + self.freq_dim, 2)
+        
+        # self.output = nn.Linear(2 * self.hidden_size + bridge_adapter_dim, 2)
         
         self.deepfake_encoder.to(deepfake_dtype)
         self.deepfake_proj.to(deepfake_dtype)
@@ -353,10 +439,28 @@ class M2F2Det(nn.Module):
 
         deepfake_features = self.avgpool2d(deepfake_features).view(B, -1)    # torch.Size([1, 1792, 11, 11]) 
         deepfake_features = self.deepfake_proj(deepfake_features)       ## torch.Size([1, 1792]) to [B, 1024]
-           
         
-        features = torch.cat([clip_vision_cls, clip_adapt_embed, deepfake_features], dim=-1)    
+        # 根据开关决定是否提取并拼接频域特征
+        if getattr(self, 'use_freq', False):
+            freq_features = self.freq_extractor(images) # 或 new_embeds，看你之前传的啥
+            freq_features = freq_features.to(deepfake_features.dtype)
+            features = torch.cat([clip_vision_cls, clip_adapt_embed, deepfake_features, freq_features], dim=-1)
+        else:
+            features = torch.cat([clip_vision_cls, clip_adapt_embed, deepfake_features], dim=-1)
+            
         output = self.output(features)
+        # # ======== 提取并拼接频域特征 ========
+        # freq_features = self.freq_extractor(images)
+        # freq_features = freq_features.to(deepfake_features.dtype)
+
+        # # 将频域特征作为第四个维度拼进去！
+        # features = torch.cat([clip_vision_cls, clip_adapt_embed, deepfake_features, freq_features], dim=-1)    
+        # output = self.output(features)
+        # # ==================================
+
+        # # features = torch.cat([clip_vision_cls, clip_adapt_embed, deepfake_features], dim=-1)    
+        # # output = self.output(features)
+
         
         if return_dict:
             output_dict = dict()
@@ -385,6 +489,12 @@ class M2F2Det(nn.Module):
         self.assign_lr(self.output, lr, params_dict_list)
         self.assign_lr(self.bridge_adapter_proj, lr, params_dict_list)
         self.assign_lr(self.clip_reduction, lr, params_dict_list)
+
+        # [新增]#######################
+        if getattr(self, 'use_freq', False):
+            self.assign_lr(self.freq_extractor.net, lr, params_dict_list)
+        #####################
+
 
         for m in self.bridge_adapter:
             self.assign_lr(m, lr, params_dict_list)

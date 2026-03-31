@@ -145,7 +145,7 @@ _seed_id = 100
 torch.backends.cudnn.deterministic = True
 torch.manual_seed(_seed_id)
 
-exp_name = 'stage_1'
+exp_name = 'stage_1_spatial'
 model_name = exp_name
 model_path = './checkpoints'
 model_path = os.path.join(model_path, model_name)
@@ -231,12 +231,25 @@ train_generator = get_dataloader(dataset=train_dataset, mode='train', bs=batch_s
 val_generator = get_dataloader(dataset=val_dataset, mode='test', bs=32, drop_last=True,workers=workers_per_gpu * gpus)
 ## droplast
 
+# ## Model definition
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# # model = DenseNet_Deepfake()
+# model = M2F2Det(
+#     clip_text_encoder_name="openai/clip-vit-large-patch14-336",
+#     clip_vision_encoder_name="openai/clip-vit-large-patch14-336",
+#     deepfake_encoder_name='efficientnet_b4',
+#     hidden_size=1792,
+# )
+
 ## Model definition
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# model = DenseNet_Deepfake()
+
+# 自动定位本地缓存的 CLIP 路径
+local_clip_path = "/data/tangchengwen/.cache/huggingface/hub/models--openai--clip-vit-large-patch14-336/snapshots/ce19dc912ca5cd21c8a653c79e251e808ccabcd1"
+
 model = M2F2Det(
-    clip_text_encoder_name="openai/clip-vit-large-patch14-336",
-    clip_vision_encoder_name="openai/clip-vit-large-patch14-336",
+    clip_text_encoder_name=local_clip_path,
+    clip_vision_encoder_name=local_clip_path,
     deepfake_encoder_name='efficientnet_b4',
     hidden_size=1792,
 )
@@ -288,7 +301,11 @@ params_dict_list = model.module.assign_lr_dict_list(lr=basic_lr)
 optimizer = torch.optim.Adam(params_dict_list, weight_decay=weight_decay)
 # lr_scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=step_factor, min_lr=1e-08, patience=patience, cooldown=5, verbose=True)
 lr_scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=step_factor, min_lr=1e-08, patience=patience, cooldown=5)
-criterion = nn.CrossEntropyLoss()
+# criterion = nn.CrossEntropyLoss()
+# 替换为带权重的损失函数：
+class_weights = torch.tensor([5.0, 1.0]).cuda() # 强迫模型更关注真脸
+criterion = nn.CrossEntropyLoss(weight=class_weights)
+#######################
 mask_criterion = nn.BCELoss()
 
 ## Re-loading the model in case
